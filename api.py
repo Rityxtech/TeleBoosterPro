@@ -190,13 +190,15 @@ async def do_scrape_users(target_group_url: str):
                 name = (user.first_name or "") + (" " + user.last_name if user.last_name else "")
                 
                 is_active = False
-                if hasattr(user, 'status'):
-                    if isinstance(user.status, (UserStatusOnline, UserStatusRecently, UserStatusLastWeek)):
+                if hasattr(user, 'status') and user.status:
+                    # STRICT RULE: Only accept Currently Online or 'Recently' (which generally means within 3 days)
+                    if isinstance(user.status, (UserStatusOnline, UserStatusRecently)):
                         is_active = True
                     elif isinstance(user.status, UserStatusOffline) and hasattr(user.status, 'was_online'):
                         if user.status.was_online:
+                            # 48 Hour strict cut-off for Offline status
                             days_ago = (datetime.datetime.now(datetime.timezone.utc) - user.status.was_online).days
-                            if days_ago <= 7:
+                            if days_ago <= 2:
                                 is_active = True
                 
                 if username and is_active:
