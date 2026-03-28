@@ -536,6 +536,7 @@ async def api_switch_account(req: AuthPhoneReq):
     if client and client.is_connected():
         await client.disconnect()
     
+    old_phone = active_phone
     active_phone = req.phone
     client = get_base_client(active_phone)
     await client.connect()
@@ -544,8 +545,24 @@ async def api_switch_account(req: AuthPhoneReq):
         await emit_log(f"[+] Switched successfully to existing account: {active_phone}")
         return {"status": "switched", "phone": active_phone}
     else:
-        await emit_log(f"[!] Warning: Switched to {active_phone} but it is NOT explicitly authorized.")
-        return {"status": "switched_but_unauthorized", "phone": active_phone}
+        # AUTO-REMOVE INCOMPLETE OR BANNED ACCOUNTS ENTIRELY
+        await client.disconnect()
+        if os.path.exists(f"{active_phone}.session"):
+            os.remove(f"{active_phone}.session")
+        if os.path.exists(f"{active_phone}.session-journal"):
+            os.remove(f"{active_phone}.session-journal")
+            
+        # Revert memory connection safely
+        client = None
+        if old_phone and os.path.exists(f"{old_phone}.session"):
+            active_phone = old_phone
+            client = get_base_client(active_phone)
+            await client.connect()
+        else:
+            active_phone = ""
+            
+        await emit_log(f"[!] Blocked switch to empty account. Ghost session {req.phone} was auto-deleted.")
+        raise HTTPException(status_code=400, detail="Account unlinked/banned. Ghost session auto-deleted.")
 
 @app.post("/api/auth/send-code")
 async def api_auth_send_code(req: AuthPhoneReq):
@@ -569,6 +586,11 @@ async def api_auth_send_code(req: AuthPhoneReq):
         return {"status": "code_sent", "phone_code_hash": res.phone_code_hash}
     except Exception as e:
         await temp_client.disconnect()
+        # AUTO-REMOVE GHOST SESSION IF CODE FAILS TO SEND
+        if os.path.exists(f"{phone}.session"):
+            os.remove(f"{phone}.session")
+        if os.path.exists(f"{phone}.session-journal"):
+            os.remove(f"{phone}.session-journal")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/auth/submit-code")
