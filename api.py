@@ -270,15 +270,16 @@ async def do_add_group(target_group_url: str):
                 break
                 
             if burst_count >= 10:
-                await emit_log(f"=> [ROTATE] Hit 10 additions on {active_phone}. Rotating...")
+                await emit_log(f"=> [REST] 10 additions complete. Resting for 5 minutes.")
+                await countdown_timer(300, "5-Minute Burst Rest")
+                
+                await emit_log(f"=> [ROTATE] Attempting to rotate session...")
                 next_p = await rotate_account()
                 if not next_p:
-                    await emit_log("[!] No other available unrestricted accounts. Resting instead...")
-                    await countdown_timer(GROUP_REST_SECONDS, "Global Rest")
-                    burst_count = 0
+                    await emit_log("[!] No other unrestricted accounts available. Continuing on same account...")
                 else:
-                    burst_count = 0
                     await emit_log(f"=> [ROTATE] Successfully rotated to {active_phone}. Resuming execution...")
+                burst_count = 0
 
             try:
                 await emit_log(f"Adding {user['username']} via {active_phone}...")
@@ -293,9 +294,9 @@ async def do_add_group(target_group_url: str):
                 burst_count += 1
                 user_idx += 1
                 
-                gap = random.uniform(3, 8)
+                gap = random.uniform(20.0, 40.0)
                 await emit_log(f" => Success! [{total_added} cumulative]. Waiting {gap:.1f}s...")
-                await countdown_timer(int(gap), "Burst gap")
+                await countdown_timer(int(gap), "Inter-add pacing")
                 
             except FloodWaitError as e:
                 await emit_log(f"[!] Explicit Rate Limit on {active_phone}: Telegram says wait {e.seconds}s.")
