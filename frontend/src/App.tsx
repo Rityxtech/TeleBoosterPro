@@ -94,6 +94,15 @@ function App() {
     setIsModalOpen(false);
   };
 
+  const handleDeleteAccount = async (phone: string) => {
+    if (window.confirm(`Are you sure you want to completely delete the session file for ${phone}?`)) {
+      setIsAuthLoading(true);
+      await apiCall('/accounts/delete', 'POST', { phone });
+      await fetchAccounts();
+      setIsAuthLoading(false);
+    }
+  };
+
   const handleSendCode = async () => {
     if (!newPhone) return;
     setIsAuthLoading(true);
@@ -171,14 +180,25 @@ function App() {
                     <div key={acc} className={`account-item ${acc === activeAccount ? 'active' : ''}`}>
                       <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{acc}</span>
                       {acc !== activeAccount ? (
-                        <button
-                          className="btn"
-                          style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem' }}
-                          onClick={() => handleSwitchAccount(acc)}
-                          disabled={isAuthLoading || isBusy}
-                        >
-                          Switch
-                        </button>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button
+                            className="btn"
+                            style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem' }}
+                            onClick={() => handleSwitchAccount(acc)}
+                            disabled={isAuthLoading || isBusy}
+                          >
+                            Switch
+                          </button>
+                          <button
+                            className="btn danger"
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                            onClick={() => handleDeleteAccount(acc)}
+                            disabled={isAuthLoading || isBusy}
+                            title="Delete this broken session"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       ) : (
                         <span className="badge" style={{ background: 'var(--success-color)', color: 'white' }}>Active</span>
                       )}

@@ -505,6 +505,31 @@ async def api_get_accounts():
             accounts.append(f.replace(".session", ""))
     return {"active": active_phone, "accounts": accounts}
 
+@app.post("/api/accounts/delete")
+async def api_delete_account(req: AuthPhoneReq):
+    global active_phone, client
+    target = req.phone
+    
+    if client and active_phone == target and client.is_connected():
+        await client.disconnect()
+        client = None
+        active_phone = ""
+        
+    try:
+        if os.path.exists(f"{target}.session"):
+            os.remove(f"{target}.session")
+        if os.path.exists(f"{target}.session-journal"):
+            os.remove(f"{target}.session-journal")
+        
+        # Clean up any pending auth hash
+        if target in temp_auth_clients:
+            del temp_auth_clients[target]
+            
+        await emit_log(f"[+] Successfully purged account data for {target}.")
+        return {"status": "deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete session file: {str(e)}")
+
 @app.post("/api/accounts/switch")
 async def api_switch_account(req: AuthPhoneReq):
     global active_phone, client
