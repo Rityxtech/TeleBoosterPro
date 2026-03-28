@@ -10,7 +10,7 @@ function App() {
   const wsRef = useRef<WebSocket | null>(null);
 
   // Accounts state
-  const [accounts, setAccounts] = useState<string[]>([]);
+  const [accounts, setAccounts] = useState<{ phone: string, restricted: boolean }[]>([]);
   const [activeAccount, setActiveAccount] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [authStep, setAuthStep] = useState<number>(0); // 0 = list, 1 = phone, 2 = code
@@ -176,34 +176,40 @@ function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   {accounts.length === 0 && <span style={{ color: 'var(--text-secondary)' }}>No saved accounts</span>}
-                  {accounts.map(acc => (
-                    <div key={acc} className={`account-item ${acc === activeAccount ? 'active' : ''}`}>
-                      <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{acc}</span>
-                      {acc !== activeAccount ? (
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                          <button
-                            className="btn"
-                            style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem' }}
-                            onClick={() => handleSwitchAccount(acc)}
-                            disabled={isAuthLoading || isBusy}
-                          >
-                            Switch
-                          </button>
-                          <button
-                            className="btn danger"
-                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
-                            onClick={() => handleDeleteAccount(acc)}
-                            disabled={isAuthLoading || isBusy}
-                            title="Delete this broken session"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="badge" style={{ background: 'var(--success-color)', color: 'white' }}>Active</span>
-                      )}
-                    </div>
-                  ))}
+                  {accounts.map(accData => {
+                    const acc = accData.phone;
+                    return (
+                      <div key={acc} className={`account-item ${acc === activeAccount ? 'active' : ''}`}>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 600, display: 'flex', alignItems: 'center' }}>
+                          {acc}
+                          {accData.restricted && <span style={{ color: '#ef4444', marginLeft: '6px', fontSize: '0.8em' }} title="Temporal Limit (PeerFlood)">🔴</span>}
+                        </span>
+                        {acc !== activeAccount ? (
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button
+                              className="btn"
+                              style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem' }}
+                              onClick={() => handleSwitchAccount(acc)}
+                              disabled={isAuthLoading || isBusy}
+                            >
+                              Switch
+                            </button>
+                            <button
+                              className="btn danger"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                              onClick={() => handleDeleteAccount(acc)}
+                              disabled={isAuthLoading || isBusy}
+                              title="Delete this broken session"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="badge" style={{ background: 'var(--success-color)', color: 'white' }}>Active</span>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
 
                 <button

@@ -5,6 +5,7 @@ import time
 import random
 import asyncio
 import datetime
+import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -88,6 +89,52 @@ current_running_task: Optional[asyncio.Task] = None
 connected_websockets: List[WebSocket] = []
 logs_history: List[str] = []
 temp_auth_clients = {} # phone -> dict("client", "hash")
+
+def load_restricted():
+    if not os.path.exists("restricted.json"): return {}
+    try:
+        with open("restricted.json", "r") as f:
+            return json.load(f)
+    except: return {}
+
+def save_restricted(data):
+    with open("restricted.json", "w") as f:
+        json.dump(data, f)
+
+def mark_restricted(phone):
+    r = load_restricted()
+    r[phone] = time.time()
+    save_restricted(r)
+
+def unmark_restricted(phone):
+    r = load_restricted()
+    if phone in r:
+        del r[phone]
+        save_restricted(r)
+
+async def rotate_account() -> str:
+    global client, active_phone
+    restricted = load_restricted()
+    sessions = sorted([f.replace(".session", "") for f in os.listdir(".") if f.endswith(".session")])
+    if not sessions: return ""
+    
+    idx = sessions.index(active_phone) if active_phone in sessions else -1
+    for i in range(1, len(sessions) + 1):
+        cand = sessions[(idx + i) % len(sessions)]
+        if cand not in restricted:
+            if client and client.is_connected():
+                await client.disconnect()
+            active_phone = cand
+            client = get_base_client(cand)
+            await client.connect()
+            if not await client.is_user_authorized():
+                await client.disconnect()
+                if os.path.exists(f"{cand}.session"): os.remove(f"{cand}.session")
+                if os.path.exists(f"{cand}.session-journal"): os.remove(f"{cand}.session-journal")
+                continue
+            await emit_log(f"[*] Native Rotation: Switched active session to {cand}")
+            return cand
+    return ""
 
 async def emit_log(msg: str):
     msg_str = str(msg)
@@ -204,93 +251,93 @@ async def do_add_group(target_group_url: str):
         
         total_added  = 0
         burst_count  = 0
-        burst_start  = time.time()
-        peer_flood_counter = 0
-
-        DAILY_CAP = 30
         
-        for user in users:
+        DAILY_CAP = 200 # Bumped up since we do multi-account
+        
+        user_idx = 0
+        while user_idx < len(users):
+            user = users[user_idx]
             user_id_str = str(user['id'])
+            
             if user_id_str in processed_users:
+                user_idx += 1
                 continue
 
             if total_added >= DAILY_CAP:
                 await emit_log(f"[+] Daily cap of {DAILY_CAP} reached. Stopping.")
                 break
                 
+            if burst_count >= 10:
+                await emit_log(f"=> [ROTATE] Hit 10 additions on {active_phone}. Rotating...")
+                next_p = await rotate_account()
+                if not next_p:
+                    await emit_log("[!] No other available unrestricted accounts. Resting instead...")
+                    await countdown_timer(GROUP_REST_SECONDS, "Global Rest")
+                    burst_count = 0
+                else:
+                    burst_count = 0
+                    await emit_log(f"=> [ROTATE] Successfully rotated to {active_phone}. Resuming execution...")
+
             try:
-                await emit_log(f"Adding {user['username']}...")
+                await emit_log(f"Adding {user['username']} via {active_phone}...")
                 user_to_add = await client.get_input_entity(user['username'])
                 await client(InviteToChannelRequest(target_group_entity, [user_to_add]))
                 
                 with open(processed_file, "a", encoding="utf-8") as pf:
                     pf.write(user_id_str + "\n")
                 processed_users.add(user_id_str)
-                peer_flood_counter = 0
-
+                
                 total_added += 1
                 burst_count += 1
-                await emit_log(f" => Success! [{burst_count}/{GROUP_BURST_SIZE} in burst | {total_added} total]")
-
-                if burst_count >= GROUP_BURST_SIZE:
-                    await emit_log(f"=> [BURST COMPLETE] Resting for {GROUP_REST_SECONDS // 60} mins...")
-                    await countdown_timer(GROUP_REST_SECONDS, "Rest Period")
-
-                    reentry_delay = random.randint(0, GROUP_REENTRY_MAX)
-                    if reentry_delay > 0:
-                        await countdown_timer(reentry_delay, "Re-entry delay")
-
-                    burst_count = 0
-                    burst_start = time.time()
-                else:
-                    elapsed = time.time() - burst_start
-                    remaining_slots = GROUP_BURST_SIZE - burst_count
-                    remaining_window = max(GROUP_BURST_WINDOW - elapsed, 0)
-                    if remaining_slots > 0 and remaining_window > 0:
-                        base_gap = remaining_window / remaining_slots
-                        jitter    = random.uniform(-2, 2)
-                        gap       = max(3, base_gap + jitter)
-                    else:
-                        gap = random.uniform(3, 8)
-                    await emit_log(f" => Waiting {gap:.1f}s before next add...")
-                    await countdown_timer(int(gap), "Burst gap")
-
+                user_idx += 1
+                
+                gap = random.uniform(3, 8)
+                await emit_log(f" => Success! [{total_added} cumulative]. Waiting {gap:.1f}s...")
+                await countdown_timer(int(gap), "Burst gap")
+                
             except FloodWaitError as e:
-                await emit_log(f"[!] Explicit Rate Limit: Telegram says wait {e.seconds}s.")
+                await emit_log(f"[!] Explicit Rate Limit on {active_phone}: Telegram says wait {e.seconds}s.")
                 await countdown_timer(e.seconds, "Flood Wait")
                 continue
             except PeerFloodError:
-                peer_flood_counter += 1
-                await emit_log(f"[!] PeerFloodError on {user['username']} (Strike {peer_flood_counter}/3)")
-                with open(processed_file, "a", encoding="utf-8") as pf:
-                    pf.write(user_id_str + "\n")
-                processed_users.add(user_id_str)
-                if peer_flood_counter >= 3:
-                    await emit_log("[!] CRITICAL: 3 consecutive Flood errors. Stopping.")
+                await emit_log(f"[!] PEER FLOOD LIMIT reached on {active_phone}. Marking restricted!")
+                mark_restricted(active_phone)
+                next_p = await rotate_account()
+                if not next_p:
+                    await emit_log("[!] CRITICAL: All available accounts are PeerFlooded. Halting task.")
                     break
-                else:
-                    await countdown_timer(120, "Cooling down")
-                    continue
+                burst_count = 0
+                continue
             except UserPrivacyRestrictedError:
                 await emit_log(f" => {user['username']} has strict privacy. Skipping.")
                 with open(processed_file, "a", encoding="utf-8") as pf:
                     pf.write(user_id_str + "\n")
                 processed_users.add(user_id_str)
+                user_idx += 1
                 continue
             except ChatWriteForbiddenError:
                 await emit_log("[!] No permission to add users to this group.")
                 break
             except Exception as e:
-                if 'privacy' in str(e).lower() or 'already' in str(e).lower() or 'participant' in str(e).lower():
+                err_str = str(e).lower()
+                if 'privacy' in err_str or 'already' in err_str or 'participant' in err_str:
                     with open(processed_file, "a", encoding="utf-8") as pf:
                         pf.write(user_id_str + "\n")
                     processed_users.add(user_id_str)
-                    if 'privacy' in str(e).lower():
+                    if 'privacy' in err_str:
                         await emit_log(f" => {user['username']} privacy settings reject.")
                     else:
                         await emit_log(f" => Already in the group. Skipping.")
+                elif 'too many requests' in err_str or 'wait' in err_str:
+                     await emit_log(f"[!] Rate limit hit on {active_phone}. Marking restricted.")
+                     mark_restricted(active_phone)
+                     next_p = await rotate_account()
+                     if not next_p: break
+                     burst_count = 0
+                     continue
                 else:
                     await emit_log(f" => Unexpected error: {str(e)}")
+                user_idx += 1
                 continue
     except asyncio.CancelledError:
         await emit_log("[!] Task was CANCELLED by the user.")
@@ -500,9 +547,14 @@ async def api_stop():
 @app.get("/api/accounts")
 async def api_get_accounts():
     accounts = []
+    restricted = load_restricted()
     for f in os.listdir("."):
         if f.endswith(".session"):
-            accounts.append(f.replace(".session", ""))
+            phone = f.replace(".session", "")
+            accounts.append({
+                "phone": phone,
+                "restricted": phone in restricted
+            })
     return {"active": active_phone, "accounts": accounts}
 
 @app.post("/api/accounts/delete")
@@ -525,6 +577,8 @@ async def api_delete_account(req: AuthPhoneReq):
         if target in temp_auth_clients:
             del temp_auth_clients[target]
             
+        unmark_restricted(target)
+            
         await emit_log(f"[+] Successfully purged account data for {target}.")
         return {"status": "deleted"}
     except Exception as e:
@@ -542,6 +596,7 @@ async def api_switch_account(req: AuthPhoneReq):
     await client.connect()
     
     if await client.is_user_authorized():
+        unmark_restricted(active_phone)
         await emit_log(f"[+] Switched successfully to existing account: {active_phone}")
         return {"status": "switched", "phone": active_phone}
     else:
