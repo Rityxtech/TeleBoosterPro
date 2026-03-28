@@ -212,8 +212,8 @@ async def do_scrape_users(target_group_url: str):
                             if days_ago <= 30:
                                 is_active = True
                 
-                if username and is_active:
-                    writer.writerow([username, user.id, user.access_hash, name, title, target_group.id])
+                if is_active:
+                    writer.writerow([username if username else str(user.id), user.id, user.access_hash, name, title, target_group.id])
                     count += 1
                     
         await emit_log(f"[+] Successfully saved {count} valid users to scraped_users.csv.")
@@ -310,14 +310,7 @@ async def do_add_group(target_group_url: str):
                 
                 added_successfully = getattr(res, 'users', [])
                 if not any(u.id == int(user['id']) for u in added_successfully):
-                    await emit_log(f" [!] Telegram returned success but {user['username']} wasn't actually added. Ghost Ban suspected.")
-                    mark_restricted(active_phone)
-                    next_p = await rotate_account()
-                    if not next_p:
-                        await emit_log("[!] CRITICAL: All accounts restricted or ghostbanned. Halting task.")
-                        break
-                    burst_count = 0
-                    continue
+                    await emit_log(f" [?] Telegram returned Success, but User Data wasn't confirmed in the return payload. Assuming Added.")
                 
                 with open(processed_file, "a", encoding="utf-8") as pf:
                     pf.write(user_id_str + "\n")
