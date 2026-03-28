@@ -38,7 +38,17 @@ function App() {
     const connectWs = () => {
       const ws = new WebSocket(WS_URL);
       ws.onmessage = (event) => {
-        setLogs(prev => [...prev.slice(-999), event.data]);
+        const log = event.data;
+        setLogs(prev => {
+          if (log.startsWith('[TIMER]') && prev.length > 0) {
+            if (prev[prev.length - 1].startsWith('[TIMER]')) {
+              const newLogs = [...prev];
+              newLogs[newLogs.length - 1] = log;
+              return newLogs;
+            }
+          }
+          return [...prev.slice(-999), log];
+        });
       };
       ws.onclose = () => {
         setTimeout(connectWs, 3000);
@@ -393,7 +403,9 @@ function App() {
               <span style={{ color: '#666' }}>Waiting for connection...</span>
             ) : null}
             {logs.map((log, i) => (
-              <div key={i}>{log}</div>
+              <div key={i} style={{ fontFamily: 'monospace' }}>
+                {log.startsWith('[TIMER]') ? log.replace('[TIMER] ', '⏳ ') : log}
+              </div>
             ))}
             <div ref={logsEndRef} />
           </div>

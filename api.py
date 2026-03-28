@@ -154,9 +154,20 @@ async def emit_log(msg: str):
         if d in connected_websockets:
             connected_websockets.remove(d)
 
+def format_time(seconds):
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    parts = []
+    if h > 0: parts.append(f"{h}hr")
+    if m > 0: parts.append(f"{m}mins")
+    parts.append(f"{s}secs")
+    return " ".join(parts)
+
 async def countdown_timer(seconds, message="Waiting"):
-    await emit_log(f"\n=> {message} {seconds}s begun...")
-    for _ in range(int(seconds)):
+    await emit_log(f"=> {message} started.")
+    for i in range(int(seconds), 0, -1):
+        await emit_log(f"[TIMER] {message}: {format_time(i)} remaining...")
         await asyncio.sleep(1)
     await emit_log(f"=> {message} completed.")
 
@@ -294,7 +305,7 @@ async def do_add_group(target_group_url: str):
                 burst_count += 1
                 user_idx += 1
                 
-                gap = random.uniform(20.0, 40.0)
+                gap = random.uniform(5.0, 12.0)
                 await emit_log(f" => Success! [{total_added} cumulative]. Waiting {gap:.1f}s...")
                 await countdown_timer(int(gap), "Inter-add pacing")
                 
