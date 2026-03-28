@@ -304,11 +304,13 @@ async def do_add_group(target_group_url: str):
 
             try:
                 await emit_log(f"Adding {user['username']} via {active_phone}...")
-                user_to_add = await client.get_input_entity(user['username'])
+                import telethon.tl.types
+                user_to_add = telethon.tl.types.InputUser(user_id=int(user['id']), access_hash=int(user['access_hash']))
                 res = await client(InviteToChannelRequest(target_group_entity, [user_to_add]))
                 
-                if hasattr(res, 'updates') and not res.updates:
-                    await emit_log(f" [!] Invite silently dropped by Telegram (Ghost Ban). Marking account restricted...")
+                added_successfully = getattr(res, 'users', [])
+                if not any(u.id == int(user['id']) for u in added_successfully):
+                    await emit_log(f" [!] Telegram returned success but {user['username']} wasn't actually added. Ghost Ban suspected.")
                     mark_restricted(active_phone)
                     next_p = await rotate_account()
                     if not next_p:
