@@ -252,6 +252,16 @@ async def do_add_group(target_group_url: str):
 
         processed_file = f"processed_{target_group.id}.txt"
         processed_users = set()
+        
+        await emit_log("[+] Scanning target group to skip existing members...")
+        try:
+            current_members = await client.get_participants(target_group, limit=5000)
+            for m in current_members:
+                processed_users.add(str(m.id))
+            await emit_log(f" => Discovered {len(current_members)} existing members. They will be actively skipped.")
+        except Exception as e:
+            await emit_log(f" [!] Could not index existing members automatically: {str(e)}")
+            
         for file in os.listdir("."):
             if file.startswith("processed_") and file.endswith(".txt"):
                 with open(file, "r", encoding="utf-8") as pf:
@@ -295,7 +305,17 @@ async def do_add_group(target_group_url: str):
             try:
                 await emit_log(f"Adding {user['username']} via {active_phone}...")
                 user_to_add = await client.get_input_entity(user['username'])
-                await client(InviteToChannelRequest(target_group_entity, [user_to_add]))
+                res = await client(InviteToChannelRequest(target_group_entity, [user_to_add]))
+                
+                if hasattr(res, 'updates') and not res.updates:
+                    await emit_log(f" [!] Invite silently dropped by Telegram (Ghost Ban). Marking account restricted...")
+                    mark_restricted(active_phone)
+                    next_p = await rotate_account()
+                    if not next_p:
+                        await emit_log("[!] CRITICAL: All accounts restricted or ghostbanned. Halting task.")
+                        break
+                    burst_count = 0
+                    continue
                 
                 with open(processed_file, "a", encoding="utf-8") as pf:
                     pf.write(user_id_str + "\n")
