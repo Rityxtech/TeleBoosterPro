@@ -300,12 +300,30 @@ async def do_add_group(target_group_url: str):
                     await emit_log("[!] No other unrestricted accounts available. Continuing on same account...")
                 else:
                     await emit_log(f"=> [ROTATE] Successfully rotated to {active_phone}. Resuming execution...")
+                    try:
+                        target_group = await client.get_entity(target_group_url)
+                        target_group_entity = InputPeerChannel(target_group.id, target_group.access_hash)
+                    except Exception as e:
+                        await emit_log(f"[!] Could not refresh target group for the new account: {str(e)}")
+                        break
                 burst_count = 0
 
             try:
                 await emit_log(f"Adding {user['username']} via {active_phone}...")
                 import telethon.tl.types
-                user_to_add = telethon.tl.types.InputUser(user_id=int(user['id']), access_hash=int(user['access_hash']))
+                
+                user_to_add = None
+                if user['username'] and not user['username'].isdigit():
+                    try:
+                        user_to_add = await client.get_input_entity(user['username'])
+                    except Exception as entity_err:
+                        from telethon.errors import FloodWaitError
+                        if isinstance(entity_err, FloodWaitError):
+                            raise entity_err
+                        user_to_add = telethon.tl.types.InputUser(user_id=int(user['id']), access_hash=int(user['access_hash']))
+                else:
+                    user_to_add = telethon.tl.types.InputUser(user_id=int(user['id']), access_hash=int(user['access_hash']))
+                
                 res = await client(InviteToChannelRequest(target_group_entity, [user_to_add]))
                 
                 added_successfully = getattr(res, 'users', [])
@@ -335,6 +353,12 @@ async def do_add_group(target_group_url: str):
                 if not next_p:
                     await emit_log("[!] CRITICAL: All available accounts are PeerFlooded. Halting task.")
                     break
+                try:
+                    target_group = await client.get_entity(target_group_url)
+                    target_group_entity = InputPeerChannel(target_group.id, target_group.access_hash)
+                except Exception as e:
+                    await emit_log(f"[!] Could not refresh target group for the new account: {str(e)}")
+                    break
                 burst_count = 0
                 continue
             except UserPrivacyRestrictedError:
@@ -349,7 +373,12 @@ async def do_add_group(target_group_url: str):
                 break
             except Exception as e:
                 err_str = str(e).lower()
-                if 'privacy' in err_str or 'already' in err_str or 'participant' in err_str:
+                if 'invalid object id for a user' in err_str or 'user_id_invalid' in err_str:
+                    await emit_log(f" => Found User ID Invalid error. Account hash is strictly scoped. Skipping {user['username']}.")
+                    with open(processed_file, "a", encoding="utf-8") as pf:
+                        pf.write(user_id_str + "\n")
+                    processed_users.add(user_id_str)
+                elif 'privacy' in err_str or 'already' in err_str or 'participant' in err_str:
                     with open(processed_file, "a", encoding="utf-8") as pf:
                         pf.write(user_id_str + "\n")
                     processed_users.add(user_id_str)
@@ -362,10 +391,19 @@ async def do_add_group(target_group_url: str):
                      mark_restricted(active_phone)
                      next_p = await rotate_account()
                      if not next_p: break
+                     try:
+                         target_group = await client.get_entity(target_group_url)
+                         target_group_entity = InputPeerChannel(target_group.id, target_group.access_hash)
+                     except Exception as ex:
+                         await emit_log(f"[!] Could not refresh target group for the new account: {str(ex)}")
+                         break
                      burst_count = 0
                      continue
                 else:
                     await emit_log(f" => Unexpected error: {str(e)}")
+                    with open(processed_file, "a", encoding="utf-8") as pf:
+                        pf.write(user_id_str + "\n")
+                    processed_users.add(user_id_str)
                 user_idx += 1
                 continue
     except asyncio.CancelledError:
