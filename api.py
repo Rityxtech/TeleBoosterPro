@@ -317,7 +317,6 @@ async def do_add_group(target_group_url: str):
                     try:
                         user_to_add = await client.get_input_entity(user['username'])
                     except Exception as entity_err:
-                        from telethon.errors import FloodWaitError
                         if isinstance(entity_err, FloodWaitError):
                             raise entity_err
                         user_to_add = telethon.tl.types.InputUser(user_id=int(user['id']), access_hash=int(user['access_hash']))
